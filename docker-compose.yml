@@ -1,0 +1,108 @@
+version: "3.9"
+
+volumes:
+  grafana_data:
+  postgres_data:
+
+services:
+  postgres:
+    image: postgres
+    container_name: highload_postgres
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-q", "-d", "postgres", "-U", "docker" ]
+      timeout: 45s
+      interval: 10s
+      retries: 10
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - APP_DB_NAME=highload_postgre
+    volumes:
+      - ./sql/init.sh:/docker-entrypoint-initdb.d/init.sh
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+  highload3_1:
+    image: highload3
+    container_name: "highload3_1"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - postgres
+    restart: always
+    ports:
+      - "5001:5000"
+  highload3_2:
+    image: highload3
+    container_name: "highload3_2"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - postgres
+    restart: always
+    ports:
+      - "5002:5000"
+  highload3_3:
+    image: highload3
+    container_name: "highload3_3"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - postgres
+    restart: always
+    ports:
+      - "5003:5000"
+  envoy:
+    image: envoyproxy/envoy
+    container_name: "envoy"
+    environment:
+      - ENABLE_ENVOY_STATS_TAGS=1
+    build:
+      context: .
+      dockerfile: Dockerfile.envoy
+    restart: always
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml
+    depends_on:
+      - highload3_1
+      - highload3_2
+      - highload3_3
+    ports:
+      - "5000:5000"
+      - "9901:9901"
+  node-exporter:
+    container_name: node-exporter
+    image: prom/node-exporter
+    restart: always
+    ports:
+      - "9100:9100"
+  prometheus:
+    image: prom/prometheus
+    container_name: "prometheus"
+    restart: always
+    depends_on:
+      - envoy
+      - node-exporter
+      - highload3_1
+      - highload3_2
+      - highload3_3
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/config/prometheus.yml
+    command:
+      - '--config.file=/etc/config/prometheus.yml'
+  grafana:
+    container_name: grafana
+    image: grafana/grafana
+    restart: always
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
